@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-var testing = true;
+// set to 'false' to connect to the real just-dice.com server
+var testing = false;
 
 var request = require('request');
 
@@ -16,18 +17,20 @@ else
 // cookie = 'hash=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef; connect.sid=s%3AAAAAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAA%AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 // run_bot(cookie);
 
-var socket,
+var version = '0.1.2',
+    socket,
     csrf,
     uid,
+    balance,
+    max_profit,
     bet_in_progress,
     chance = '49.5',
     stake = '1',
     hilo = 'hi',
     bet_stake_threshold = 1,
     bet_profit_threshold = 1,
-    show_all_my_bets = true;
-
-var my_profit = 0;
+    show_all_my_bets = true,
+    user_profit = {};
 
 //// ignore broken site certificate on test box
 if (testing)
@@ -83,6 +86,11 @@ function handle_command(txt) {
                 console.log('set chance to', chance + '%');
                 break;
 
+            case 'd':
+            case 'deposit':
+                socket.emit('deposit', csrf);
+                break;
+
             case 'h':
             case 'hi':
             case 'high':
@@ -118,6 +126,15 @@ function handle_command(txt) {
                 console.log('set hi/lo to toggle');
                 break;
 
+            case 'w':
+            case 'wd':
+            case 'withdraw':
+                validate_address(txt[1]);
+                validate_number(txt[2]);
+                console.log('withdrawing', txt[2], 'to', txt[1]);
+                socket.emit('withdraw', csrf, txt[1], txt[2], txt[3]);
+                break;
+
             case '?':
             case 'help':
                 show_help();
@@ -130,6 +147,14 @@ function handle_command(txt) {
     } catch (err) {
         console.log(err);
     }
+}
+
+function validate_address(addr) {
+    if (addr === undefined)
+        throw new Error("missing required address");
+
+    if (!addr.match(/^x[1-9a-km-zA-HJ-NP-Z]{33}$/))
+        throw new Error("invalid CLAM address");
 }
 
 function validate_number(num) {
@@ -146,8 +171,12 @@ function validate_number(num) {
         throw new Error("number should have nothing other than digits and dots in it");
 }
 
+function show_news(news) {
+    console.log('NEWS:', news);
+}
+
 function show_help() {
-    console.log('type to chat, or (.b)et, (.c)hance, (.h)i, (.l)o, (.p)ayout, (.s)take, (.t)oggle (.help)');
+    console.log('type to chat, or (.b)et, (.c)hance, (.d)eposit, (.h)i, (.l)o, (.p)ayout, (.s)take, (.t)oggle (.w)ithdraw (.help)');
     console.log('hit return on its own to repeat last line');
 }
 
@@ -234,8 +263,21 @@ function run_bot(cookie) {
         cookie: cookie
     }});
 
+    socket.on('getver', function(key) {
+        socket.emit('version', csrf, key, "jdbot:" + version);
+    });
+
     socket.on('error', function(err) {
         console.log('caught error:', err);
+    });
+
+    socket.on('news', function(news) {
+        show_news(news);
+    });
+
+    socket.on('staked', function(dat) {
+        var ourstake = dat.stake_pft ? '; your share = ' + tidy(dat.stake_share) + '; your total = ' + tidy(dat.stake_pft) + '' : '';
+        console.log('STAKED: we just staked', tidy(dat.stake), '(total =', tidy(dat.total) + ourstake + ')');
     });
 
     socket.on('init', function(data) {
@@ -309,7 +351,10 @@ function run_bot(cookie) {
             //   wdaddr: '' }
 
             csrf = data.csrf;
+            balance = data.balance;
+            max_profit = data.max_profit;
             console.log('connected as (' + uid + ') <' + data.name + '>');
+            show_news(data.news);
             // console.log('csrf is', csrf);
             init_readline();
         } else {
@@ -325,13 +370,13 @@ function run_bot(cookie) {
 
     // this triggers when we win a bet
     socket.on('wins', function(count) {
-        console.log('WIN:', count);
+        // console.log('WIN:', count);
         bet_in_progress = false;
     });
 
     // this triggers when we lose a bet
     socket.on('losses', function(count) {
-        console.log('LOSE:', count);
+        // console.log('LOSE:', count);
         bet_in_progress = false;
     });
 
@@ -377,7 +422,13 @@ function run_bot(cookie) {
         //   balance: '989.70000000',
         //   profit: '-106.31000000' }
 
-        if ((show_all_my_bets && result.uid == uid) || result.this_profit >= bet_profit_threshold || result.bet >= bet_stake_threshold)
+        var this_profit = parseFloat(result.this_profit);
+
+        if (user_profit[result.uid] === undefined)
+            user_profit[result.uid] = 0;
+
+        user_profit[result.uid] += this_profit;
+        if ((show_all_my_bets && result.uid == uid) || this_profit >= bet_profit_threshold || result.bet >= bet_stake_threshold)
             console.log('RESULT:', result.name,
                         '[betid', result.betid + ',',
                         'bets', result.bets + ',',
@@ -386,13 +437,26 @@ function run_bot(cookie) {
                         'on', result.high ? 'hi' : 'lo',
                         'at', result.chance + '%',
                         'and', result.win ? 'won;' : 'lost;',
-                        'profit', result.this_profit);
+                        'profit', result.this_profit,
+                        'cumulative profit', user_profit[result.uid]);
 
+        max_profit = result.max_profit;
         if (result.uid == uid) {
-            console.log("that's me!");
-            my_profit += parseFloat(result.this_profit);
-            console.log("my profit", my_profit);
+            // console.log("that's me!");
+            balance = result.balance;
         }
+    });
+
+    socket.on('address', function(addr, img, confs) {
+        console.log('DEPOSIT:', addr);
+    });
+
+    socket.on('invest_error', function(txt) {
+        console.log('ERROR:', txt);
+    });
+
+    socket.on('divest_error', function(txt) {
+        console.log('ERROR:', txt);
     });
 
     socket.on('jderror', function(txt) {
@@ -409,6 +473,16 @@ function run_bot(cookie) {
 
     socket.on('login_error', function(txt) {
         console.log('LOGIN ERROR:', txt);
+    });
+
+    socket.on('balance', function(data) {
+        balance = data;
+        console.log('BALANCE:', balance);
+    });
+
+    socket.on('max_profit', function(mp) {
+        max_profit = mp;
+        console.log('MAX PROFIT:', max_profit);
     });
 
     socket.on('disconnect', function() {
