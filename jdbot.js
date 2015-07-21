@@ -1,23 +1,20 @@
 #!/usr/bin/env node
 
 // set to 'false' to connect to the real just-dice.com server
-var testing = false;
+var testing = (process.env.JDBOT_TESTING != '0');
 
 var request = require('request');
 
 var url = testing ? "https://test.com" : "https://just-dice.com";
 
 // EITHER (A) call login_then_run_bot() with your 64 character hash:
-if (testing)
-    login_then_run_bot('e47004523222720bdf835f741505f7acd9d7ead728893b65fd4ac59b07a33a20');
-else
-    login_then_run_bot('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef');
+login_then_run_bot(process.env.JDBOT_HASH);
 
 // OR (B) as a shortcut, call run_bot() with your full hash+sid cookie (as shown when you use login_then_run_bot()) to skip the login step:
 // cookie = 'hash=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef; connect.sid=s%3AAAAAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAA%AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 // run_bot(cookie);
 
-var version = '0.1.2',
+var version = '0.1.3',
     socket,
     csrf,
     uid,
@@ -105,6 +102,13 @@ function handle_command(txt) {
                 console.log('set hi/lo to lo');
                 break;
 
+            case 'n':
+            case 'name':
+                validate_string(txt[1]);
+                console.log('attempting to change name to "' + txt[1] + '"');
+                socket.emit('name', csrf, txt[1]);
+                break;
+
             case 'p':
             case 'payout':
                 validate_number(txt[1]);
@@ -171,12 +175,17 @@ function validate_number(num) {
         throw new Error("number should have nothing other than digits and dots in it");
 }
 
+function validate_string(str) {
+    if (str === undefined)
+        throw new Error("missing required string");
+}
+
 function show_news(news) {
     console.log('NEWS:', news);
 }
 
 function show_help() {
-    console.log('type to chat, or (.b)et, (.c)hance, (.d)eposit, (.h)i, (.l)o, (.p)ayout, (.s)take, (.t)oggle (.w)ithdraw (.help)');
+    console.log('type to chat, or (.b)et, (.c)hance, (.d)eposit, (.h)i, (.l)o, (.n)ame (.p)ayout, (.s)take, (.t)oggle (.w)ithdraw (.help)');
     console.log('hit return on its own to repeat last line');
 }
 
@@ -223,7 +232,7 @@ function login_then_run_bot(hash) {
             return;
         }
 
-        console.log('logged in; got cookie:');
+        console.log('logged in; got cookie (secret - do not share!):');
         console.log(cookie);
         run_bot(cookie);
     });
