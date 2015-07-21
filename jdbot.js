@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 
+var testing = true;
+
 var request = require('request');
-var url = "https://just-dice.com";
+
+var url = testing ? "https://test.com" : "https://just-dice.com";
 
 // EITHER (A) call login_then_run_bot() with your 64 character hash:
-login_then_run_bot('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef');
+if (testing)
+    login_then_run_bot('e47004523222720bdf835f741505f7acd9d7ead728893b65fd4ac59b07a33a20');
+else
+    login_then_run_bot('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef');
 
-// OR (B) call run_bot() with your full hash+sid cookie (as shown when you use login_then_run_bot()) to skip the login step:
+// OR (B) as a shortcut, call run_bot() with your full hash+sid cookie (as shown when you use login_then_run_bot()) to skip the login step:
 // cookie = 'hash=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef; connect.sid=s%3AAAAAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAA%AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 // run_bot(cookie);
 
@@ -23,8 +29,9 @@ var socket,
 
 var my_profit = 0;
 
-//// ignore broken site certificate
-// process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+//// ignore broken site certificate on test box
+if (testing)
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 function init_readline() {
     var readline = require('readline').createInterface({
@@ -182,7 +189,11 @@ function bet(chance, stake, hilo) {
 
 function login_then_run_bot(hash) {
     login(hash, function(err, cookie) {
-        if (err) return console.log('ERROR:', err);
+        if (err) {
+            console.log('ERROR:', err);
+            return;
+        }
+
         console.log('logged in; got cookie:');
         console.log(cookie);
         run_bot(cookie);
@@ -197,8 +208,15 @@ function login(hash, cb) {
         // form: {nick: 'secret_user', password: 'yourpassword'},
         jar: jar
     }, function(err, res, body) {
-        if (err) return cb(err);
-        return cb(null, jar.getCookieString(url));
+        if (err)
+            return cb(err);
+
+        var cookie = jar.getCookieString(url);
+
+        if (!cookie.match(/hash=/))
+            return cb('bad hash');
+
+        return cb(null, cookie);
     });
 }
 
@@ -224,9 +242,74 @@ function run_bot(cookie) {
         uid = data.uid;
         if (!inits++) {
             // only do this stuff the first time we connect, not on reconnection
-            // console.log(data);
+
+            // data is something like this:
+            //
+            // { api: 0,
+            //   balance: '988.00000000',
+            //   bankroll: '500215.49619137',
+            //   bet: 0.5,
+            //   bets: '2474',
+            //   chance: 33,
+            //   chat: 
+            //    [ '{"user":"1243","name":"tammie","txt":"chat text 1"}',
+            //      '1437445872584',
+            //      '{"user":"1","name":"@derpy","txt":"etc."}',
+            //      '1437452160715',
+            //      '{"user":"1","name":"@derpy","txt":"etc.}',
+            //      '1437452172081' ],
+            //   csrf: 'f68wiCdKcdf6',
+            //   edge: 1,
+            //   fee: 0.001,
+            //   ga: { active: false, failures: 0, last: '327860', ok: 1437123260013 },
+            //   ignores: [],
+            //   investment: 500181.4929641858,
+            //   invest_pft: 181.49296418577433,
+            //   login: '<p>You can log into the same account from a different computer or browser using <a href="/e47004523222720bdf835f741505f7acd9d7ead728893b65fd4ac59b07a33a20">this link</a>.<br/>Protect this secret link as it can be used to access your account balance.</p><p>If you prefer to use a more traditional and secure approach then<button id="setup_account">set up a username and password</button>.</p>',
+            //   losses: '1305',
+            //   luck: '96.28%',
+            //   max_profit: '130001.07',
+            //   name: 'dooglus',
+            //   news: 'no news is set',
+            //   nonce: '477',
+            //   offsite: 25500000,
+            //   percent: 99.99986921944092,
+            //   profit: '-108.01000000',
+            //   seed: '770695475991960934442523',
+            //   settings: 
+            //    { max_bet: 1,
+            //      chat_watch_player: null,
+            //      alert_words: 'dooglus',
+            //      alert: 1,
+            //      hilite: 1,
+            //      pmding: 1,
+            //      chat_min_risk: 1,
+            //      chat_min_change: 1,
+            //      styleme: 1 },
+            //   shash: 'bf7feb2c04020f94262d9f01fa62fa4ce527e58f357372969ccb46c2ab85d3ed',
+            //   stake_pft: 98.6989727076143,
+            //   uid: '1',
+            //   username: null,
+            //   wagered: '2295.81000000',
+            //   wins: '1169',
+            //   stats: 
+            //    { bets: '3315',
+            //      wins: 1542,
+            //      losses: 1773,
+            //      luck: 3217.2707228742447,
+            //      wagered: 2824.9700003,
+            //      profit: -94.09198439,
+            //      commission: 22.264911885550614,
+            //      taken: 0,
+            //      purse: 26000215.49619137,
+            //      cold: 25500000,
+            //      balance: 60827.14134891,
+            //      sum1: 561042.63754028,
+            //      sum2: 561064.90245217 },
+            //   wdaddr: '' }
+
             csrf = data.csrf;
-            console.log('connected, uid =', uid);
+            console.log('connected as (' + uid + ') <' + data.name + '>');
             // console.log('csrf is', csrf);
             init_readline();
         } else {
@@ -328,7 +411,7 @@ function run_bot(cookie) {
         console.log('LOGIN ERROR:', txt);
     });
 
-    socket.on('disconnected', function() {
-        console.log('socket disconnect');
+    socket.on('disconnect', function() {
+        console.log('disconnected');
     });
 }
