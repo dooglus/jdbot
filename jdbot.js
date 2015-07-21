@@ -14,12 +14,13 @@ login_then_run_bot(process.env.JDBOT_HASH);
 // cookie = 'hash=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef; connect.sid=s%3AAAAAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAA%AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 // run_bot(cookie);
 
-var version = '0.1.3',
+var version = '0.1.4',
     socket,
     csrf,
     uid,
     balance,
     max_profit,
+    base, factor, steps, martingale = false, martingale_delay = 10,
     bet_in_progress,
     chance = '49.5',
     stake = '1',
@@ -73,7 +74,7 @@ function handle_command(txt) {
 
             case 'b':
             case 'bet':
-                bet(chance, stake, hilo);
+                bet(stake, chance, hilo);
                 break;
 
             case 'c':
@@ -100,6 +101,20 @@ function handle_command(txt) {
             case 'low':
                 hilo = 'lo';
                 console.log('set hi/lo to lo');
+                break;
+
+            case 'm':
+            case 'martin':
+            case 'martingale':
+                // .martingale <base> <factor> <steps>
+                validate_number(txt[1]); base   = parseFloat(txt[1]);
+                validate_number(txt[2]); factor = parseFloat(txt[2]);
+                validate_integer(txt[3]); steps = parseInt(txt[3]);
+
+                console.log('martingaling from base', txt[1] + ', multiplying by', txt[2], 'on loss, and making', txt[3], 'bets');
+                martingale = true;
+                steps--;
+                bet(stake = base, chance, hilo);
                 break;
 
             case 'n':
@@ -161,6 +176,14 @@ function validate_address(addr) {
         throw new Error("invalid CLAM address");
 }
 
+function validate_integer(num) {
+    if (num === undefined)
+        throw new Error("missing required integer");
+
+    if (!num.match(/^[1-9][0-9]*$/))
+        throw new Error("number should have nothing other than digits in it");
+}
+
 function validate_number(num) {
     if (num === undefined)
         throw new Error("missing required number");
@@ -185,7 +208,7 @@ function show_news(news) {
 }
 
 function show_help() {
-    console.log('type to chat, or (.b)et, (.c)hance, (.d)eposit, (.h)i, (.l)o, (.n)ame (.p)ayout, (.s)take, (.t)oggle (.w)ithdraw (.help)');
+    console.log('type to chat, or (.b)et, (.c)hance, (.d)eposit, (.h)i, (.l)o, (.m)artingale (.n)ame (.p)ayout, (.s)take, (.t)oggle (.w)ithdraw (.help)');
     console.log('hit return on its own to repeat last line');
 }
 
@@ -204,7 +227,7 @@ function tidy(val, fixed)
 
 var last_hilo;
 
-function bet(chance, stake, hilo) {
+function bet(stake, chance, hilo) {
     if (bet_in_progress) {
         console.log('you have a bet in progress already');
         return;
@@ -220,7 +243,7 @@ function bet(chance, stake, hilo) {
         // else just remember what we bet in case we toggle next time
         last_hilo = hilo;
 
-    console.log('BET:', stake, '@', tidy(chance, 4) + '%', last_hilo);
+    console.log('BET:', stake, '@', tidy(chance, 4) + '%', last_hilo + (martingale ? ' [steps ' + steps + ']' : ''));
     bet_in_progress = true;
     socket.emit('bet', csrf, {chance: tidy(chance, 4), bet: tidy(stake), which: last_hilo});
 }
@@ -379,14 +402,33 @@ function run_bot(cookie) {
 
     // this triggers when we win a bet
     socket.on('wins', function(count) {
-        // console.log('WIN:', count);
+        // console.log('WIN:', count); console.log('steps', steps);
         bet_in_progress = false;
+        if (martingale) {
+            stake = base;
+            if (steps > 0) {
+                steps--;
+                setTimeout(function() {
+                    bet(stake, chance, hilo);
+                }, martingale_delay);
+            } else {
+                martingale = false;
+            }
+        }
     });
 
     // this triggers when we lose a bet
     socket.on('losses', function(count) {
-        // console.log('LOSE:', count);
+        // console.log('LOSE:', count); console.log('steps', steps);
         bet_in_progress = false;
+        if (martingale) {
+            if (steps > 0)
+                steps--;
+            stake *= factor;
+            setTimeout(function() {
+                bet(stake, chance, hilo);
+            }, martingale_delay);
+        }
     });
 
     // this triggers for every bet the server tells us about; they're not all ours
@@ -447,7 +489,7 @@ function run_bot(cookie) {
                         'at', result.chance + '%',
                         'and', result.win ? 'won;' : 'lost;',
                         'profit', result.this_profit,
-                        'cumulative profit', user_profit[result.uid]);
+                        'cumulative profit', tidy(user_profit[result.uid]));
 
         max_profit = result.max_profit;
         if (result.uid == uid) {
