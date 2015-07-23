@@ -8,6 +8,7 @@ var request = require('request');
 var url = testing ? "https://test.com" : "https://just-dice.com";
 
 // EITHER (A) call login_then_run_bot() with your 64 character hash:
+// login_then_run_bot(process.env.JDBOT_USERNAME, process.env.JDBOT_PASSWORD);
 login_then_run_bot(process.env.JDBOT_HASH);
 
 // OR (B) as a shortcut, call run_bot() with your full hash+sid cookie (as shown when you use login_then_run_bot()) to skip the login step:
@@ -34,6 +35,8 @@ var version = '0.1.4',
 if (testing)
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
+init_readline();
+
 function init_readline() {
     var readline = require('readline').createInterface({
         input: process.stdin, output: process.stdout, terminal: false
@@ -57,6 +60,11 @@ function handle_command(txt) {
     }
 
     last_command = txt;
+
+    if (!socket) {
+        console.log('not connected');
+        return;
+    }
 
     // lines that don't begin with a dot are sent as if entered in the chat box
     if (!txt.match(/^[.]/)) {
@@ -103,6 +111,13 @@ function handle_command(txt) {
                 console.log('set hi/lo to lo');
                 break;
 
+            case 'login':
+                validate_string(txt[1]);
+                validate_string(txt[2]);
+                console.log('attempting to log in <username> <password> [2fa code]');
+                socket.emit('login', csrf, txt[1], txt[2], txt[3]);
+                break;
+
             case 'm':
             case 'martin':
             case 'martingale':
@@ -124,6 +139,13 @@ function handle_command(txt) {
                 socket.emit('name', csrf, txt[1]);
                 break;
 
+            case 'passwd':
+                validate_string(txt[1]);
+                validate_string(txt[2]);
+                console.log('attempting to change password <from> <to>');
+                socket.emit('change_password', csrf, txt[1], txt[2]);
+                break;
+
             case 'p':
             case 'payout':
                 validate_number(txt[1]);
@@ -143,6 +165,13 @@ function handle_command(txt) {
             case 'toggle':
                 hilo = 'tog';
                 console.log('set hi/lo to toggle');
+                break;
+
+            case 'userpass':
+                validate_string(txt[1]);
+                validate_string(txt[2]);
+                console.log('attempting to set username to "' + txt[1] + '"');
+                socket.emit('setup_account', csrf, txt[1], txt[2]);
                 break;
 
             case 'w':
@@ -289,11 +318,11 @@ function run_bot(cookie) {
 
     var inits = 0;
 
-    socket = require("socket.io-client")
-    (url, {transports: [transport], extraHeaders: {
-        origin: url,
-        cookie: cookie
-    }});
+    socket = require("socket.io-client")(url, {transports: [transport],
+                                               extraHeaders: {
+                                                   origin: url,
+                                                   cookie: cookie
+                                               }});
 
     socket.on('getver', function(key) {
         socket.emit('version', csrf, key, "jdbot:" + version);
@@ -388,7 +417,6 @@ function run_bot(cookie) {
             console.log('connected as (' + uid + ') <' + data.name + '>');
             show_news(data.news);
             // console.log('csrf is', csrf);
-            init_readline();
         } else {
             console.log('reconnected');
             // console.log('csrf was', csrf, 'and now is', data.csrf);
@@ -396,8 +424,14 @@ function run_bot(cookie) {
         }
     });
 
+    socket.on('set_hash', function(hash) {
+        console.log('INFO:', 'server requested that we reconnect...');
+        socket.close();
+        run_bot(cookie);
+    });
+
     socket.on('chat', function(txt, date) {
-        console.log('CHAT', txt);
+        console.log('CHAT:', txt);
     });
 
     // this triggers when we win a bet
@@ -540,3 +574,20 @@ function run_bot(cookie) {
         console.log('disconnected');
     });
 }
+
+//// other events the server reacts to:
+//    client.on('disable_ga', function(csrf, code) {
+//    client.on('divest', function(csrf, amount, code) {
+//    client.on('done_edit_ga', function(csrf, code, flags) {
+//    client.on('edit_ga', function(csrf) {
+//    client.on('forget_max_warning', function(csrf) {
+//    client.on('history', function(csrf, type) {
+//    client.on('invest', function(csrf, amount, code) {
+//    client.on('invest_box', function(csrf) {
+//    client.on('random', function(csrf) {
+//    client.on('repeat', function(csrf) {
+//    client.on('roll', function(csrf, betid) {
+//    client.on('seed', function(csrf, data, dismiss) {
+//    client.on('setting', function(csrf, type, setting, value) {
+//    client.on('setup_ga_code', function(csrf, code) {
+//    client.on('user', function(csrf, data) {
