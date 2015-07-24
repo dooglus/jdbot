@@ -1,21 +1,36 @@
 #!/usr/bin/env node
 
-// set to 'false' to connect to the real just-dice.com server
-var testing = (process.env.JDBOT_TESTING != '0');
+// run it like this:
+//
+//   JDBOT_USERNAME=jimmy JDBOT_PASSWORD=jimbob69 node jdbot.js
+//
+// or like this:
+//
+//   JDBOT_HASH=593afcad142013baab41d2f67b409549a14a14e3ab07547b2eb7485c2a08c36b node jdbot.js
+//
+// and include a JDBOT_CODE=123456 at the start if you need 2FA to log in
 
 var request = require('request');
+var url = "https://just-dice.com";
 
-var url = testing ? "https://test.com" : "https://just-dice.com";
+// my local test instance doesn't have an SSL certificate
+if (process.env.JDBOT_TESTING == '1') {
+    url = "https://test.com";
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+}
 
 // EITHER (A) call login_then_run_bot() with your 64 character hash:
-// login_then_run_bot(process.env.JDBOT_USERNAME, process.env.JDBOT_PASSWORD);
-login_then_run_bot(process.env.JDBOT_HASH);
+login_then_run_bot({hash:     process.env.JDBOT_HASH,
+                    username: process.env.JDBOT_USERNAME,
+                    password: process.env.JDBOT_PASSWORD,
+                    code:     process.env.JDBOT_CODE
+                   });
 
 // OR (B) as a shortcut, call run_bot() with your full hash+sid cookie (as shown when you use login_then_run_bot()) to skip the login step:
 // cookie = 'hash=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef; connect.sid=s%3AAAAAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAA%AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 // run_bot(cookie);
 
-var version = '0.1.4',
+var version = '0.1.5',
     socket,
     csrf,
     uid,
@@ -30,12 +45,6 @@ var version = '0.1.4',
     bet_profit_threshold = 1,
     show_all_my_bets = true,
     user_profit = {};
-
-//// ignore broken site certificate on test box
-if (testing)
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
-init_readline();
 
 function init_readline() {
     var readline = require('readline').createInterface({
@@ -114,7 +123,7 @@ function handle_command(txt) {
             case 'login':
                 validate_string(txt[1]);
                 validate_string(txt[2]);
-                console.log('attempting to log in <username> <password> [2fa code]');
+                console.log('attempting to log in <username> <password> [2FA code]');
                 socket.emit('login', csrf, txt[1], txt[2], txt[3]);
                 break;
 
@@ -277,8 +286,8 @@ function bet(stake, chance, hilo) {
     socket.emit('bet', csrf, {chance: tidy(chance, 4), bet: tidy(stake), which: last_hilo});
 }
 
-function login_then_run_bot(hash) {
-    login(hash, function(err, cookie) {
+function login_then_run_bot(credentials) {
+    login(credentials, function(err, cookie) {
         if (err) {
             console.log('ERROR:', err);
             return;
@@ -290,16 +299,35 @@ function login_then_run_bot(hash) {
     });
 }
 
-function login(hash, cb) {
+function login(credentials, cb) {
     var jar = request.jar();
 
-    request.get({
-        url: url + '/' + hash,
-        // form: {nick: 'secret_user', password: 'yourpassword'},
-        jar: jar
-    }, function(err, res, body) {
+    req = {url: url, jar: jar, form: {}}
+
+    if (credentials.hash) {
+        if (credentials.username || credentials.password)
+            return cb('either specify a hash or a username and password');
+        jar.setCookie(request.cookie('hash=' + credentials.hash), url);
+    }
+
+    if (credentials.username) req.form.username = credentials.username;
+    if (credentials.password) req.form.password = credentials.password;
+    if (credentials.code)     req.form.code     = credentials.code;
+
+    request.post(req, function(err, res, body) {
         if (err)
             return cb(err);
+
+        // console.log(body);
+
+        if (body.match(/Please enter your 6 digit google authentification number/))
+            return cb('that account requires a correct 2FA code and hash to log in; 2FA codes can only be used once each');
+
+        if (body.match(/Your account is set up to require a google authentification code for this action/))
+            return cb('that account requires a 2FA code in addition to the username and password to log in');
+
+        if (body.match(/Please enter your username/))
+            return cb('that account requires a correct username and password, and possibly 2FA code; 2FA codes can only be used once each');
 
         var cookie = jar.getCookieString(url);
 
@@ -310,7 +338,14 @@ function login(hash, cb) {
     });
 }
 
+var first_login = true;
+
 function run_bot(cookie) {
+    if (first_login) {
+        init_readline();
+        first_login = false;
+    }
+
     show_help();
 
     var transport = 'websocket';

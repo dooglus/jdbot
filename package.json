@@ -1,6 +1,6 @@
 {
     "name": "jdbot",
-    "version": "0.1.4",
+    "version": "0.1.5",
     "description": "Bot for Just-Dice.com",
     "main": "jdbot.js",
     "dependencies": {
