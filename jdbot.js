@@ -376,8 +376,10 @@ function run_bot(cookie) {
         console.log('STAKED: we just staked', tidy(dat.stake), '(total =', tidy(dat.total) + ourstake + ')');
     });
 
-    socket.on('tip', function(from, name, amount, comment) {
-        console.log('TIP: you received', amount, 'from (' + from + ') <' + name + '>' + (comment ? ' [' + comment + ']' : ''));
+    socket.on('tip', function(from, name, amount, comment, ignored) {
+        // only show tips if we didn't ignore the sender
+        if (!ignored)
+            console.log('TIP: you received', amount, 'from (' + from + ') <' + name + '>' + (comment ? ' [' + comment + ']' : ''));
     });
 
     socket.on('init', function(data) {
