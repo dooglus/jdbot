@@ -37,9 +37,10 @@ var version = '0.1.5',
     balance,
     max_profit,
     base, factor, steps, martingale = false, martingale_delay = 10,
+    flatbet_seconds, flatbet_count,
     bet_in_progress,
     chance = '49.5',
-    stake = '1',
+    stake = '0',
     hilo = 'hi',
     bet_stake_threshold = 1,
     bet_profit_threshold = 1,
@@ -104,6 +105,23 @@ function handle_command(txt) {
             case 'd':
             case 'deposit':
                 socket.emit('deposit', csrf);
+                break;
+
+            case 'f':
+            case 'flat':
+            case 'flatbet':
+                // .flatbet <seconds>
+                validate_integer(txt[1]); flatbet_seconds = parseInt(txt[1]);
+
+                console.log('flat betting stake', stake, 'chance', chance, 'for', flatbet_seconds, 'seconds');
+                flatbet_count = 0;
+                bet(stake, chance, hilo);
+
+                setTimeout(function() {
+                    console.log('flat betting timeout; made', flatbet_count, 'bets in', flatbet_seconds, 'seconds; ', flatbet_count/flatbet_seconds, 'bets per second');
+                    flatbet_seconds = 0;
+                }, flatbet_seconds * 1000);
+
                 break;
 
             case 'h':
@@ -246,7 +264,7 @@ function show_news(news) {
 }
 
 function show_help() {
-    console.log('type to chat, or (.b)et, (.c)hance, (.d)eposit, (.h)i, (.l)o, (.m)artingale (.n)ame (.p)ayout, (.s)take, (.t)oggle (.w)ithdraw (.help)');
+    console.log('type to chat, or (.b)et, (.c)hance, (.d)eposit, (.f)latbet, (.h)i, (.l)o, (.m)artingale (.n)ame (.p)ayout, (.s)take, (.t)oggle (.w)ithdraw (.help)');
     console.log('hit return on its own to repeat last line');
 }
 
@@ -489,6 +507,9 @@ function run_bot(cookie) {
             } else {
                 martingale = false;
             }
+        } else if (flatbet_seconds) {
+            flatbet_count++;
+            bet(stake, chance, hilo);
         }
     });
 
@@ -503,6 +524,9 @@ function run_bot(cookie) {
             setTimeout(function() {
                 bet(stake, chance, hilo);
             }, martingale_delay);
+        } else if (flatbet_seconds) {
+            flatbet_count++;
+            bet(stake, chance, hilo);
         }
     });
 
