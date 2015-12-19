@@ -590,6 +590,9 @@ function run_bot(cookie) {
                         'profit', result.this_profit,
                         'cumulative profit', tidy(user_profit[result.uid]));
 
+        if (result.balance !== undefined)
+            console.log('BALANCE:', result.balance);
+
         max_profit = result.max_profit;
         if (result.uid == uid) {
             // console.log("that's me!");
